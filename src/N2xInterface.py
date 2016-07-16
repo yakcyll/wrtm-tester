@@ -1,6 +1,9 @@
 from socket import socket, recv, sendall, SHUT_RDWR
 
 
+def listFromReponse(response):
+    return output[output.find("{")+1:output.rfind("}")].split(' ')
+
 class N2xInterface(object):
 
     """WRTM N2X Interface Class
@@ -21,32 +24,64 @@ class N2xInterface(object):
 
         self._readWrapper.readBuffer = ""
 
-        self.smAddress = address
-        self.smPort = port
-        self.smSocket = None
-        
-        self.sessionSocket = None
+        self.proxyAddress = address
+        self.proxyPort = port
+        self.proxySocket = None
 
     def reverseProxy(self):
         serverSocket = socket.socket()
         serverSocket.bind("0.0.0.0:" + str(self.smPort))
         serverSocket.listen(1)
-        self.smSocket, self.smAddress = self.socket.accept()
+        self.proxySocket, self.proxyAddress = self.socket.accept()
         serverSocket.shutdown(socket.SHUT_RDWR)
         serverSocket.close()
 
-    def connect(self):
+    def connectToProxy(self):
         raise NotImplementedError()
 
-    def disconnect(self):
-
     def shutdown(self):
-        
-    def invoke(self, interfaceName, methodName, args):
-        data = "invoke " + interfaceName + " " + methodName + " " + args;
 
-        self._writeWrapper(data)
-        result, output = self._readWrapper()
+    def connectToSession(self, sessionId=None):
+        output = self.smInvoke("AgtSessionManager", "ListOpenSessions")
+        sessionList = map(int, listFromResponse(output))
+        if sessionId is None or sessionId not in sessionList:
+            sessionId = None
+            for sId in sessionList:
+                sessionLabel = self.getSessionLabel(sId)
+                if sessionLabel != "SYSTEM":
+                    sessionId = sId
+                    break
+
+        if sessionId is not None:
+            sessionPort = self.getSessionPort(sessionId)
+            self._writeWrapper(self.proxySocket, "connect " + str(sessionPort))
+            result, output = self._readWrapper(self.proxySocket)
+            if result != 0:
+               raise RuntimeError("errorneous response in connectToSession: (" 
+                                  + str(result) + ") " + output)
+
+            self.sessionId = sesionId
+
+    def disconnectFromSession(self):
+        if self.sessionId < 1:
+            return
+        
+        self._writeWrapper(self.proxySocket, "disconnect")
+        result, output = self._readWrapper(self.proxySocket)
+        if result != 0:
+            raise RuntimeError("errorneous response in disconnectFromSession: (" 
+                               + str(result) + ") " + output)
+
+        self.sessionId = -1
+
+    def smInvoke(self, interfaceName, methodName, args=""):
+        return self.invoke("sm " + interfaceName, methodName, args)
+        
+    def invoke(self, interfaceName, methodName, args=""):
+        data = "invoke " + interfaceName + " " + methodName + " " + str(args);
+
+        self._writeWrapper(data, self.proxySsocket)
+        result, output = self._readWrapper(self.proxySocket)
 
         if result != 0:
             raise RuntimeError('Error: "' + output + '" while executing command: ' + data)
@@ -77,3 +112,219 @@ class N2xInterface(object):
         except OSError:
             self.shutdown()
             raise
+
+    # N2X API session management wrappers
+    def openSession(self, sessionType, sessionMode="AGT_SESSION_ONLINE"):
+        args = sessionType + " " + sessionMode
+        sessionId = int(self.smInvoke("AgtSessionManager", "OpenSession", args))
+        self.connectToSession(sessionId)
+
+    def closeSession(self):
+        sessionId = self.sessionId
+        if self.sessionId < 1:
+            return
+
+        self.disconnectFromSession()
+        self.smInvoke("AgtSessionManager", "CloseSession", sessionId)
+
+    def getSessionLabel(self, sessionId):
+        return self.smInvoke("AgtSessionManager", "GetSessionLabel", sessionId)
+
+    def setSessionLabel(self, sessionId, sessionLabel):
+        args = str(sessionId) + " " + sessionLabel
+        self.smInvoke("AgtSessionManager", "SetSessionLabel", args)
+
+    def listObjects(self, objType="AGT_ALL", fileName=""):
+        if objType == "AGT_SAVEABLE":
+            return self.invoke("AgtTestSession", "ListSaveableInterfaces")
+        elif objType == "AGT_SAVED":
+            return self.invoke("AgtTestSession", "ListSavedInterfaces", fileName)
+        else
+            return self.invoke("AgtTestSession", "ListInterfaces")
+
+    def resetSession(self, interfaceNames=None):
+        if interfaceNames is not None:
+            return self.invoke("AgtTestSession", "ResetInterfaces", ' '.join(interfaceNames))
+        return self.invoke("AgtTestSession", "ResetSession")
+
+    def saveSession(self, fileName, interfaceNames=None):
+        if interfaceNames is not None:
+            args = fileName + " " + ' '.join(interfaceNames)
+            return self.invoke("AgtTestSession", "SaveInterfaces", args)
+        return self.invoke("AgtTestSession", "SaveSession", fileName)
+
+    def restoreSession(self, fileName, interfaceNames=None):
+        if self.sessionId < 1:
+            self.openSession("FcPerformance")
+
+        if interfaceNames is not None:
+            args = fileName + " " + ' '.join(interfaceNames)
+            self.invoke("AgtTestSession", "RestoreInterfaces", args)
+        else:
+            self.invoke("AgtTestSession", "RestoreSession", fileName)
+
+    # N2X API session specific wrappers
+    def addPortsToSession(self, ports):
+        if type(ports) is list:
+            ports = "[list " + ' '.join(ports) + "]"
+        self.ports = listFromResponse(self.invoke("AgtPortSelector", "AddPorts", ports))
+
+    def listAddressPools(self, port):
+        return listFromResponse(self.invoke("AgtEthernetAddresses", "ListAddressPools", str(port)))                
+    def listSutIpAddresses(self, port):
+        return listFromResponse(self.invoke("AgtEthernetAddresses", "ListSutIpAddresses", str(port)))                
+    def modifySutIpAddress(self, port, oldip, ip):
+        try:
+            socket.inet_pton(oldip)
+            socket.inet_pton(ip)
+        except socket.error:
+            raise RuntimeError("Malformed IP address supplied (oldip=" + oldip + ",ip=" + ip + ")")
+
+        args = port + " " + oldip + " " ip
+        self.invoke("AgtEthernetAddresses", "ModifySutIpAddress", args)
+
+    def setSutIpAddress(self, port, ip):
+        self.modifySutIpAddress(port, self.listSutIpAddresses(port)[0], ip)
+
+    def setTesterIpAddress(self, port, ip, mask, noaddr=1, step=1):
+        try:
+            socket.inet_pton(ip)
+        except socket.error:
+            raise RuntimeError("Malformed IP address supplied (ip=" + ip + ")")
+
+        args = self.listAddressPools(port)[0] + " " + ip + " " + mask + " " 
+               + str(noaddr) + " " + str(step)
+        self.invoke("AgtEthernetAddressPool", "SetTesterIpAddresses", args)
+
+    def addProfile(self, port, profileType):
+        args = port + " " + profileType
+        self.profiles.append(self.invoke("AgtProfileList", "AddProfile", args))
+
+    def setProfileMode(self, profile, profileType, profileMode):
+        args = profile + " " + profileMode
+        self.invoke(profileType, "SetMode", args)
+
+    def setProfileAverageLoad(self, profile, profileType, load):
+        args = profile + " " + load
+        self.invoke(profileType, "SetAverageLoad", args)
+
+    def addStreamGroupToProfile(self, profile):
+        args = profile + " AGT_PACKET_STREAM_GROUP 1"
+        output = self.invoke("AgtStreamGroupList", "AddStreamGroupsWithExistingProfile", args)
+        firstLBracket = output.find('{')
+        firstRBracket = output.find('}', firstLBracket)
+        secondLBracket = output.find('{', firstRBracket)
+        secondRBracket = output.find('}', secondLBracket)
+
+        self.streamGroups.append(output[firstLBracket+1:firstRBracket])
+        self.PDUs.append(output[secondLBracket+1:secondRBracket])
+
+    def setExpectedDestinations(self, streamGroup, ports): 
+        if type(ports) is list:
+            ports = "[list " + ' '.join(ports) + "]"
+
+        args = streamgroup + " " + ports
+        self.invoke("AgtStreamGroup", "SetExpectedDestinationPorts", args)
+
+    def enableL2ErrorInjection(self, streamGroup, errorType):
+        args = streamgroup + " AGT_L2_FCS_ERROR"
+        self.invoke("AgtStreamGroup", "SetL2Error", args)
+
+    def setFixedPDUFieldValue(self, pdu, protocol, field, value):
+        args = pdu + " \"" + protocol + "\" 1 \"" + field + "\" " + value
+        self.invoke("AgtPduHeader", "SetFieldFixedValue", args)
+
+    def setIpv4SourceAddress(self, pdu, addr):
+        self.setFixedPduFieldValue(pdu, "ipv4", "source_address", addr)
+
+    def setIpv4DestinationAddress(self, pdu, addr):
+        self.setFixedPduFieldValue(pdu, "ipv4", "destination_address", addr)
+
+    def setTcpSourcePort(self, pdu, addr):
+        self.setFixedPduFieldValue(pdu, "tcp", "source_port", addr)
+
+    def setTcpDestinationPort(self, pdu, addr):
+        self.setFixedPduFieldValue(pdu, "tcp", "destination_port", addr)
+
+    def setUdpSourcePort(self, pdu, addr):
+        self.setFixedPduFieldValue(pdu, "udp", "source_port", addr)
+
+    def setUdpDestinationPort(self, pdu, addr):
+        self.setFixedPduFieldValue(pdu, "udp", "destination_port", addr)
+
+    def setPayloadFill(self, pdu, fillType, hexFill):
+        args = pdu + " " + fillType + " " + hexFill
+        self.invoke("AgtPduPayload", "SetPayloadFill", args)
+
+    # N2X API capture configuration wrappers
+    def setCapturePorts(self, ports):
+        if type(ports) is list:
+            ports = "[list " + ' '.join(ports) + "]"
+
+        self.invoke("AgtCaptureControl", "SetPortGroup", ports)
+
+    def clearFiltersOnPort(self, port):
+        self.invoke("AgtCaptureFilter", "ClearAllFilters", port)
+
+    def createFrameMatcher(self, port):
+        self.frameMatchers.append(self.invoke("AgtFrameMatcherList", "AddFrameMatcher", port))
+
+    def addMatcherFrameFlags(self, frameMatcher, frameFlag):
+        args = frameMatcher + " " + frameFlag
+        self.invoke("AgtFrameMatcher", "AddFrameFlags", args)
+
+    def addMatcherFilter(self, port, frameMatcher, filter):
+        args = port + " " + frameMatcher + " " + filter
+        self.invoke("AgtCaptureFilter", "AddFrameMatcherFilterss", args)
+
+    def setCaptureMode(self, capMode):
+        self.invoke("AgtCaptureControl", "SetCaptureMode", capMode)
+
+    def setErroredFrameFilter(self, port, filter):
+        args = port + " " + filter
+        self.invoke("AgtStatisticsControl", "SetErroredFrameFilter", args)
+
+    # N2X API test/capture control wrappers
+    def startCapture(self):
+        self.invoke("AgtCaptureControl", "StartCapture")
+
+    def getCaptureState(self):
+        return self.invoke("AgtCaptureControl", "GetCaptureState")[12:]
+
+    def stopCapture(self):
+        self.invoke("AgtCaptureControl", "StopCapture")
+
+    def startTest(self):
+        self.invoke("AgtTestController", "StartTest")
+
+    def getTestState(self):
+        return self.invoke("AgtTestController", "GetTestState")[9:]
+
+    def stopTest(self):
+        self.invoke("AgtTestController", "StopTest")
+
+    # N2X API statistics wrappers
+    def createStatHandler(self):
+        self.stats.append(self.invoke("AgtStatisticsList", "Add", "AGT_STATISTICS"))
+
+    def selectStats(self, stats, statTypes):
+        args = stats + " {" + statTypes + "}"
+        self.invoke("AgtStatistics", "SelectStatistics", args)
+
+    def selectStatPorts(self, stats, ports):
+        if type(ports) is list:
+            ports = "[list " + ' '.join(ports) + "]"
+
+        args = stats + " " + ports
+        self.invoke("AgtStatistics", "SelectPorts", args)
+
+    def selectStatStreamGroup(self, stats, streamGroups):
+        if type(streamGroups) is list:
+            streamGroups = "[list " + ' '.join(streamGroups) + "]"
+
+        args = stats + " " + streamGroups
+        self.invoke("AgtStatistics", "SelectStreamGroups", args)
+
+    def collectStats(self, stats, streamGroup):
+        args = stats + " " + streamGroup
+        return listFromResponse(self.invoke("AgtStatistics", "GetStreamGroupStatistics", args))
