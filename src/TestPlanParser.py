@@ -64,13 +64,14 @@ class TestPlanParser(object):
                 
                 testTuple[3] = offset
 
-                yield self.parseTestLine(testTuple)
+                yield self.parseTestLine(i+1, testTuple)
     
         return None
     
-    def parseTestLine(self, testTuple):
+    def parseTestLine(self, testIter, testTuple):
         testSplit = testTuple.split(' ')
-        return [int(testSplit[0]),  # testId 
+        return [testIter,
+                int(testSplit[0]),  # testId 
                 testSplit[1],       # interfaceName
                 int(testSplit[2]),  # testDuration
                 int(testSplit[3]),  # address/offset
