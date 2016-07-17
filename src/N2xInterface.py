@@ -39,7 +39,9 @@ class N2xInterface(object):
     def connectToProxy(self):
         raise NotImplementedError()
 
-    def shutdown(self):
+    def disconnectFromProxy(self):
+        self.proxySocket.shutdown(socket.SHUT_RDWR)
+        self.proxySocket.close()
 
     def connectToSession(self, sessionId=None):
         output = self.smInvoke("AgtSessionManager", "ListOpenSessions")
@@ -127,11 +129,17 @@ class N2xInterface(object):
         self.disconnectFromSession()
         self.smInvoke("AgtSessionManager", "CloseSession", sessionId)
 
-    def getSessionLabel(self, sessionId):
+    def getSessionLabel(self, sessionId=None):
+        if sessionId is None:
+            sessionId = self.sessionId
+
         return self.smInvoke("AgtSessionManager", "GetSessionLabel", sessionId)
 
-    def setSessionLabel(self, sessionId, sessionLabel):
-        args = str(sessionId) + " " + sessionLabel
+    def setSessionLabel(self, sessionLabel, sessionId=None):
+        if sessionId is None:
+            sessionId = self.sessionId
+
+        args = str(sessionId) + " {" + sessionLabel + "}"
         self.smInvoke("AgtSessionManager", "SetSessionLabel", args)
 
     def listObjects(self, objType="AGT_ALL", fileName=""):
@@ -223,8 +231,15 @@ class N2xInterface(object):
         if type(ports) is list:
             ports = "[list " + ' '.join(ports) + "]"
 
-        args = streamgroup + " " + ports
+        args = streamGroup + " " + ports
         self.invoke("AgtStreamGroup", "SetExpectedDestinationPorts", args)
+
+    def setPduHeaders(self, streamGroup, headerTypes):
+        if type(headerTypes) is list:
+            headerTypes = "[list " + ' '.join(headerTypes) + "]"
+
+        args = streamGroup + " " + headerTypes
+        self.invoke("AgtStreamGroup", "SetPduHeaders", args)
 
     def enableL2ErrorInjection(self, streamGroup, errorType):
         args = streamgroup + " AGT_L2_FCS_ERROR"

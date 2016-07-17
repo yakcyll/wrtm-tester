@@ -8,5 +8,5 @@ setup(
     description='Master testing app orchestrating WRTMasher modules on a remote DUT',
     author='Marcin Dziezyc',
     author_email='yakcyll@gmail.com',
-    packages=['timeout-decorator'],
+    packages=['timeout-decorator', 'pyping'],
 )

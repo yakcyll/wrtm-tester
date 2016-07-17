@@ -9,7 +9,7 @@ class TestPlanParser(object):
        described in a separate line of a 'plan' option of a section. Each such line 
        has a format of:
 
-           test-name interface-identifier test-length address/offset mask
+           test-id interface-identifier test-length address/offset mask
 
        Address/offset can either be an immediate value or a difference from the last
        returned value (in the form of +x or -x).
@@ -23,12 +23,22 @@ class TestPlanParser(object):
         self.parser = SafeConfigParser()
         self.loaded = False
         self.loadedPath = None
+        self.testTypes = {}
 
     def load(self, path):
         if len(self.parser.read(path)) <= 1:
             raise RuntimeError("Unable to load the specified file.")
         self.loaded = True
         self.loadedPath = path
+
+    def loadTestTypes(self, fileName):
+        testsFile = open(fileName)
+        for testType in testsFile:
+            splitarray = testType.split(' ')
+            testId = int(splitarray[0])
+            testContinuous = int(splitarray[1])
+            testDescription = ' '.join(splitarray[2:])
+            self.testTypes[testId] = (testContinuous, testDescription)
 
     def getListOfTests(self):
         if self.loaded:
@@ -57,3 +67,11 @@ class TestPlanParser(object):
                 yield self.parseTestLine(testTuple)
     
         return None
+    
+    def parseTestLine(self, testTuple):
+        testSplit = testTuple.split(' ')
+        return [int(testSplit[0]),  # testId 
+                testSplit[1],       # interfaceName
+                int(testSplit[2]),  # testDuration
+                int(testSplit[3]),  # address/offset
+                int(testSplit[4])]  # mask
