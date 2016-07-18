@@ -192,10 +192,10 @@ class WrtmTester(object):
                         if delay < 0:
                             self._startLoadStreams()
                             time.sleep(-delay)
-                            self._sendTest(testIter, test)
+                            self._sendTest(test)
                             testRunning = True
                         else:
-                            self._sendTest(testIter, test)
+                            self._sendTest(test)
                             testRunning = True
                             time.sleep(delay)
                             self._startLoadStreams()
@@ -224,7 +224,7 @@ class WrtmTester(object):
                 testRunning = False
 
                 # after pinging: send stop-test, wait for ack; if no response, fail the test
-                self._sendStopTest(testIter, test)
+                self._sendStopTest(test)
 
                 # post-test:
                 print("\tTest done. Waiting for the router to announce its readiness.")
@@ -285,7 +285,7 @@ class WrtmTester(object):
         initSocket.close()
         self.routerSocket.close()
 
-    def _prepareTestPacket(self, testIter, test, stop=False):
+    def _prepareTestPacket(self, test, stop=False):
         if stop:
             stop = 1
         else:
@@ -302,15 +302,38 @@ class WrtmTester(object):
                               test[5])
         return outPack
 
-    def _sendTest(self, testIter, test):
+    def _sendTest(self, test):
+        timeDiff = 0
+
         outPack = self._prepareTestPacket(test)
         self.routerSocket.send(outPack, self.routerIp + ":" + WrtmTester.TEST_PORT)
-        #wait for ack
+
+        while timeDiff < WrtmTester.RCV_TIMEOUT:
+            startTime = time.time()
+            read,_,_ = socket.select([self.routerSocket], [], [], WrtmTester.RCV_TIMEOUT - timeDiff)
+            stopTime = time.time()
+            timeDiff = stopTime - startTime
+            if read != []:
+                raise WrtmTimeoutError()
+            ackData = self.routerSocket.recv(10)
+            ackPack = struct.unpack("<2xiL", ackData)
+
+            # code i dont understand
+            if ackPack[1] == 0:
+                if ackPack[0] == test[1]:
+                    raise WrtmTestError("Got an ack for a wrong test?? " + str(test))
+            else:
+                if ackPack[1] == 2:
+                    continue
+                elif ackPack[1] == 2:
+                    raise WrtmTestError("Specified test type (" + str(test[1]) + ") "
+                                        + "was not identified on RUT!")
+                raise WrtmTestError("Received a NACK for test #" + str(test[0]) + " from RUT!")
 
     def _sendStopTest(self, test):
-        outPack = self._prepareTestPacket(test, stop=True)
-        self.routerSocket.send(outPack, self.routerIp + ":" + WrtmTester.TEST_PORT)
-        #wait for ack
+        test[5] = 1
+        self._sendTest(test)
+        test[5] = 0
 
     def _formResultString(self, errCode, testTime, retCount):
         timeStr = time.strftime("%d-%m-%Y %H-%M-%S", time.gmtime())
