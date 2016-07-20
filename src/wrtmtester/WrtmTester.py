@@ -1,13 +1,13 @@
 import argparse
-import paramiko
-import pyping
+import select
 import socket
 import struct
 import sys
 import time
 
-import N2xInterface
-import TestPlanParser
+from wrtmtester import N2xInterface
+from wrtmtester import TestPlanParser
+from wrtmtester.ping import ping_one
 
 
 class WrtmTestError(RuntimeError):
@@ -32,11 +32,12 @@ class WrtmTester(object):
 
     ARGPARSE_DESCRIPTION = "WRTM Tester 0.13.37"
 
-    INIT_PORT = 
-    TEST_PORT = 
+    INIT_PORT = 4094 
+    TEST_PORT = 7999
 
-    INIT_MAGIC =
+    INIT_MAGIC = str('\xFE\xE1\x13\x37')
     INIT_TIMEOUT = 120
+    RCV_TIMEOUT = 10
 
     ERR_OK = 0
     ERR_RCV_TIMEOUT = 4
@@ -50,8 +51,9 @@ class WrtmTester(object):
 
     def initN2X(self):
         print('Waiting for n2x proxy to connect...')
-        self.n2x.reverseProxy(self)
+        self.n2x.reverseProxy()
 
+        print('Establishing an N2X session...')
         self.n2x.openSession("RouterTester900")
         try:
             self.n2x.addPortsToSession(['101/1', '101/2', '101/3', '101/4'])
@@ -158,11 +160,11 @@ class WrtmTester(object):
 
         # init router socket
         self.routerSocket = socket.socket(type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
-        self.routerSocket.bind(socket.INADDR_ANY + ":" + WrtmTester.TEST_PORT)
+        self.routerSocket.bind(('', WrtmTester.TEST_PORT))
 
         # init init socket
         initSocket = socket.socket(type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
-        initSocket.bind(socket.INADDR_ANY + ":" + WrtmTester.INIT_PORT)
+        initSocket.bind(('', WrtmTester.INIT_PORT))
 
         # open result file
         resultsFile = open("results_" + timeStr + ".txt", "a+")
@@ -180,8 +182,9 @@ class WrtmTester(object):
                     print("\tExecuting test #" + str(test[0]))
                     try:
                         # ping router
-                        r = pyping.ping(routerIp)
-                        if r.ret_code != 0:
+                        try:
+                            ping_one(self.routerIp)
+                        except socket.error:
                             self.shutdownN2X()
                             raise WrtmTestError("Router under test did not respond to the "
                                                 + "initial ping request. Abandoning ship.")
@@ -204,7 +207,7 @@ class WrtmTester(object):
                         retCount += 1
                         if retCount == 3:
                             raise WrtmTimeoutError("Test #" + str(test[0]) + " skipped "
-                                                   + "due to excessive number of retries."
+                                                   + "due to excessive number of retries.")
                         print("\tLink with the router timed out. Retrying...")
 
                 testStartTime = time.time()
@@ -214,8 +217,9 @@ class WrtmTester(object):
 
                 for pingCount in range(0, test[3]):
                     time.sleep(1)
-                    r = pyping(routerIp)
-                    if r.ret_code != 0:
+                    try:
+                        ping_one(self.routerIp)
+                    except socket.error:
                         self.shutdownN2X()
                         raise WrtmTimeoutError("Router under test did not respond to a ping request "
                                                + "during test #" + str(test[0]))
@@ -239,12 +243,12 @@ class WrtmTester(object):
                 # check if the router is ready (by waiting for broadcast on router socket)
                 # if router wont broadcast within 120 seconds, reboot through UPS
                 for i in range(0, WrtmTester.INIT_TIMEOUT):
-                    rsock, _, _ = socket.select([self.routerSocket], [], [], 1)
+                    rsock, _, _ = select.select([self.routerSocket], [], [], 1)
                     if rsock != []:
                         data, addr = rsock.recvfrom(4096)
                         if addr != routerIp:
                             continue
-                        if data[2:6] == bytes('\xFF\xFF\xFF\xFF') and 
+                        if data[2:6] == str('\xFF\xFF\xFF\xFF') and \
                            data[6:10] == WrtmTester.INIT_MAGIC:
                             print("\tResuming testing in 5 seconds...")
                             time.sleep(5)
@@ -253,7 +257,7 @@ class WrtmTester(object):
                 # flush init socket
                 initSocket.close()
                 initSocket = socket.socket(type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
-                initSocket.bind(socket.INADDR_ANY + ":" + WrtmTester.INIT_PORT)
+                initSocket.bind(('', WrtmTester.INIT_PORT))
 
             except WrtmTestError as te:
                 print("\t" + str(te))
@@ -265,7 +269,7 @@ class WrtmTester(object):
                 # if test timed out on pings/second send-ack or test init, report failure and go next
                 if testRunning:
                     testTime = testStopTime - testStartTime
-                else
+                else:
                     testTime = 0
                 
                 print("\t" + str(tme))
@@ -290,14 +294,14 @@ class WrtmTester(object):
             stop = 1
         else:
             stop = 0
-        outPack = struct.pack("<IIILII128cII",
+        outPack = struct.pack("<IIILII128sII",
                               test[0],
                               test[0],
                               test[1],
                               136,
                               test[3],
                               stop,
-                              test[2].ljust('\0', 136),
+                              bytes(test[2], 'utf-8') + bytes('\0', 'utf-8') * (128 - len(test[2])),
                               test[4],
                               test[5])
         return outPack
@@ -306,11 +310,11 @@ class WrtmTester(object):
         timeDiff = 0
 
         outPack = self._prepareTestPacket(test)
-        self.routerSocket.send(outPack, self.routerIp + ":" + WrtmTester.TEST_PORT)
+        self.routerSocket.sendto(outPack, (self.routerIp, WrtmTester.TEST_PORT))
 
         while timeDiff < WrtmTester.RCV_TIMEOUT:
             startTime = time.time()
-            read,_,_ = socket.select([self.routerSocket], [], [], WrtmTester.RCV_TIMEOUT - timeDiff)
+            read,_,_ = select.select([self.routerSocket], [], [], WrtmTester.RCV_TIMEOUT - timeDiff)
             stopTime = time.time()
             timeDiff = stopTime - startTime
             if read != []:
@@ -337,22 +341,23 @@ class WrtmTester(object):
 
     def _formResultString(self, errCode, testTime, retCount):
         timeStr = time.strftime("%d-%m-%Y %H-%M-%S", time.gmtime())
-        result = "#" + str(test[0]) + " (" + timeStr 
-                 + ") status: " + str(errCode) 
-                 + " id: " + str(test[1])
-                 + " if: " + test[2]
-                 + " (o,m/c): (" + str(test[4]) + "," + str(test[5])
-                 + ") time:  " + str(testTime)
+        result = "#" + str(test[0]) + " (" + timeStr \
+                 + ") status: " + str(errCode) \
+                 + " id: " + str(test[1]) \
+                 + " if: " + test[2] \
+                 + " (o,m/c): (" + str(test[4]) + "," + str(test[5]) \
+                 + ") time:  " + str(testTime) \
                  + "s retries: " + str(retCount)
         return result
         
     def main(self, argv):
         # check if run with sudo (required for ping)
+        argv = argv[1:]
         try:
-            pingSocket = socket.socket(socket.AF_INET, socket.SOCK_RAW, ICMP_CODE)
+            pingSocket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
         except socket.error as e:
             if e.errno == 1 or e.errno == 10013:
-                raise socket.error(''.join((e.args[1],
+                raise socket.error('\n'.join((e.args[1],
                                            "WRTM Tester utilizes a raw ICMP socket to send "
                                            + "echo request (ping) packets and because of that, it "
                                            + "requires admin privileges (a.k.a. try sudo).")))
@@ -364,26 +369,26 @@ class WrtmTester(object):
                             help='path to the test description file')
         parser.add_argument('--noload', action='store_true',
                             help='disable automatic N2X initialization',
-                            required=False)
+                            required=False, default=False)
         args = parser.parse_args(argv)
 
         # init test types?
         self.testParser.loadTestTypes('tests.txt')
 
         # load tests
-        self.testParser.load(args['filePath'])
+        self.testParser.load(args.filePath)
 
         # init n2x
-        if 'noload' in args:
+        if not args.noload:
             self.initN2X()
 
         # execute plan
         for testPlan in [x for x in self.testParser.sections() if x != 'main']:
             print("Starting test '" + testPlan + "'"
-                  + " at " + time.strftime("%d-%m-%Y %H-%M-%S", time.gmtime())
+                  + " at " + time.strftime("%d-%m-%Y %H:%M:%S", time.gmtime()))
             self.executePlan(testPlan)
             print("***\n")
 
         # shutdown n2x
-        if 'noload' in args:
+        if not args.noload:
             self.shutdownN2X()

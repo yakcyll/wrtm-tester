@@ -26,7 +26,7 @@ class TestPlanParser(object):
         self.testTypes = {}
 
     def load(self, path):
-        if len(self.parser.read(path)) <= 1:
+        if len(self.parser.read(path)) < 1:
             raise RuntimeError("Unable to load the specified file.")
         self.loaded = True
         self.loadedPath = path
@@ -39,6 +39,9 @@ class TestPlanParser(object):
             testContinuous = int(splitarray[1])
             testDescription = ' '.join(splitarray[2:])
             self.testTypes[testId] = (testContinuous, testDescription)
+
+    def sections(self):
+        return self.parser.sections()
 
     def getListOfTests(self):
         if self.loaded:
@@ -69,10 +72,9 @@ class TestPlanParser(object):
         return None
     
     def parseTestLine(self, testIter, testTuple):
-        testSplit = testTuple.split(' ')
         return [testIter,
-                int(testSplit[0]),  # testId 
-                testSplit[1],       # interfaceName
-                int(testSplit[2]),  # testDuration
-                int(testSplit[3]),  # address/offset
-                int(testSplit[4])]  # mask
+                int(testTuple[0]),  # testId 
+                testTuple[1],       # interfaceName
+                int(testTuple[2]),  # testDuration
+                int(testTuple[3]),  # address/offset
+                int(testTuple[4])]  # mask

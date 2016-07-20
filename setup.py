@@ -3,11 +3,12 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='WRTM-Tester',
+    name='WRTMTester',
     version='0.1',
     description='Master testing app orchestrating WRTMasher modules on a remote DUT',
     author='Marcin Dziezyc',
     author_email='yakcyll@gmail.com',
-    packages=find_packages(),
+    packages=['wrtmtester'],
+    package_dir={'wrtmtester': 'src/wrtmtester'},
     install_requires=['timeout-decorator', 'pyping'],
 )

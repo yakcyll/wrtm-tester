@@ -1,0 +1,11 @@
+1 1 Packet dropping.
+2 1 Packet masking.
+3 1 Socket buffer masking (driver)
+4 1 Socket buffer masking (packet handling)
+5 0 net_device masking
+6 0 in_device masking
+7 1 dst_entry masking
+8 0 net_bridge masking
+9 0 net_bridge_port masking
+10 0 Forwarding database masking
+11 0 Procedure code masking

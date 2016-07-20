@@ -1,4 +1,4 @@
-from socket import socket, recv, sendall, SHUT_RDWR
+from socket import socket, SHUT_RDWR
 
 
 def listFromReponse(response):
@@ -22,7 +22,7 @@ class N2xInterface(object):
         self.frameMatchers = []
         self.stats = []
 
-        self._readWrapper.readBuffer = ""
+        self.readBuffer = ""
 
         self.proxyAddress = address
         self.proxyPort = port
@@ -100,11 +100,11 @@ class N2xInterface(object):
 
     def _readWrapper(self, socket):
         try:
-            while "\r\n" not in self._readWrapper.readBuffer:
-                self._readWrapper.readBuffer += str(socket.recv(4096))
+            while "\r\n" not in self.readBuffer:
+                self.readBuffer += str(socket.recv(4096))
 
-            parts = self._readWrapper.readBuffer.partition("\r\n")
-            self._readWrapper.readBuffer = parts[2]
+            parts = self.readBuffer.partition("\r\n")
+            self.readBuffer = parts[2]
             
             result = int(parts[0].partition(' ')[0])
             output = parts[0].partition(' ')[2]
@@ -147,7 +147,7 @@ class N2xInterface(object):
             return self.invoke("AgtTestSession", "ListSaveableInterfaces")
         elif objType == "AGT_SAVED":
             return self.invoke("AgtTestSession", "ListSavedInterfaces", fileName)
-        else
+        else:
             return self.invoke("AgtTestSession", "ListInterfaces")
 
     def resetSession(self, interfaceNames=None):
@@ -188,7 +188,7 @@ class N2xInterface(object):
         except socket.error:
             raise RuntimeError("Malformed IP address supplied (oldip=" + oldip + ",ip=" + ip + ")")
 
-        args = port + " " + oldip + " " ip
+        args = port + " " + oldip + " " + ip
         self.invoke("AgtEthernetAddresses", "ModifySutIpAddress", args)
 
     def setSutIpAddress(self, port, ip):
@@ -200,7 +200,7 @@ class N2xInterface(object):
         except socket.error:
             raise RuntimeError("Malformed IP address supplied (ip=" + ip + ")")
 
-        args = self.listAddressPools(port)[0] + " " + ip + " " + mask + " " 
+        args = self.listAddressPools(port)[0] + " " + ip + " " + mask + " " \
                + str(noaddr) + " " + str(step)
         self.invoke("AgtEthernetAddressPool", "SetTesterIpAddresses", args)
 
