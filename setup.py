@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from distutils.core import setup
+from setuptools import setup, find_packages
 
 setup(
     name='WRTM-Tester',
@@ -8,5 +8,6 @@ setup(
     description='Master testing app orchestrating WRTMasher modules on a remote DUT',
     author='Marcin Dziezyc',
     author_email='yakcyll@gmail.com',
-    packages=['timeout-decorator', 'pyping'],
+    packages=find_packages(),
+    install_requires=['timeout-decorator', 'pyping'],
 )
