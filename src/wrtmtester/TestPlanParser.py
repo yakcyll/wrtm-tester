@@ -48,6 +48,14 @@ class TestPlanParser(object):
             return self.parser.sections()
         return None
 
+    def getNumberOfTestCases(self, name):
+        if self.parser.has_option(name, 'loop'):
+            loops = self.parser.getint(name, 'loop')
+        else:
+            loops = 1
+
+        return len(self.parser[name]['plan'].split('\n')[1:]) * loops
+
     def getTestGenerator(self, name=None):
         if self.parser.has_option(name, 'loop'):
             loops = self.parser.getint(name, 'loop')
