@@ -188,7 +188,10 @@ class WrtmTester(object):
                             break
 
                         print("\r\t" + str(re))
-                        # reboot here
+                        os.system('upscmd -u admin -p asdf everwrt load.off')
+                        print("\r\t** System powered down. Restoring power in 10...")
+                        time.sleep(10)
+                        os.system('upscmd -u admin -p asdf everwrt load.on')
                         continue
 
                 if rebootCounter == 3:

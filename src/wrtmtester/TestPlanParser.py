@@ -62,6 +62,11 @@ class TestPlanParser(object):
         else:
             loops = 1
 
+        if self.parser.has_option(name, 'offsetStep'):
+            offsetStep = self.parser.getint(name, 'offsetStep')
+        else:
+            offsetStep = 0
+
         tests = self.parser[name]['plan'].split('\n')[1:]
         offset = 0
 
@@ -71,7 +76,7 @@ class TestPlanParser(object):
                 if testTuple[3][0] == '+' or testTuple[3][0] == '-':
                     offset += int(testTuple[3][0])
                 else:
-                    offset = int(testTuple[3][0])
+                    offset = int(testTuple[3][0]) + it * offsetStep
                 
                 testTuple[3] = offset
 
