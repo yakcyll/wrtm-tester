@@ -87,3 +87,10 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+# VIM MAYBE?
+*.swp
+
+# also .txt and .log files, 'cause results
+*.txt
+*.log
