@@ -59,6 +59,7 @@ class SerialReader(object):
             try:
                 xstr = x.decode('utf8')
             except UnicodeDecodeError:
+                x = x[:-1]  # TODO: losing chars?
                 continue
 
             if self.verbose:
@@ -70,7 +71,7 @@ class SerialReader(object):
 
         # read the rest
         self.handle.timeout = 2
-        xstr = self.handle.read().decode('utf8')
+        xstr = (x + self.handle.read()).decode('utf8')
         if self.verbose:
             print(xstr, end="")
         self.outputFile.write(xstr)
