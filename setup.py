@@ -10,5 +10,5 @@ setup(
     author_email='yakcyll@gmail.com',
     packages=['wrtmtester'],
     package_dir={'wrtmtester': 'src/wrtmtester'},
-    install_requires=['timeout-decorator', 'pyping'],
+    install_requires=['pyserial'],
 )

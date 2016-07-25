@@ -6,6 +6,7 @@ import struct
 import sys
 import time
 
+from wrtmtester import SerialReader
 from wrtmtester import TestPlanParser
 from wrtmtester import WrtmN2xWrapper
 from wrtmtester.ping import ping_one
@@ -50,16 +51,26 @@ class WrtmTester(object):
     def __init__(self):
         self.testParser = TestPlanParser()
         self.n2x = WrtmN2xWrapper()
+        self.serial = SerialReader()
 
         self.routerSocket = None
         self.routerIp = None
 
-    def executePlan(self, testName):
+    def executePlan(self, testName, verboseLog):
         self.routerIp = self.testParser.parser['main']['routerIp']
         testStartTime = 0
         testStopTime = 0
         testRunning = False
         timeStr = time.strftime("%d-%m-%Y_%H-%M-%S", time.gmtime())
+
+        # init serial reader
+        if self.testParser.parser.has_option('main', 'tty'):
+            tty = self.testParser.parser['main']['tty']
+        else:
+            tty = '/dev/ttyAMA0'
+
+        self.serial.init(tty, "wrt54gl-log-" + testName + "-" + timeStr + ".log")
+        self.serial.setVerbose(verboseLog)
 
         # init router socket
         self.routerSocket = socket.socket(type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
@@ -191,6 +202,7 @@ class WrtmTester(object):
 
             except WrtmTestError as te:
                 print("\r\t" + str(te))
+                self.serial.close()
                 self.routerSocket.close()
                 initSocket.close()
                 return
@@ -211,8 +223,8 @@ class WrtmTester(object):
         # testing done!
         print("\rTest suite done!")
 
-        # pkill minicom to close log file and close the result file
-        #os.system("pkill minicom")
+        # close the serial reader and the result file
+        self.serial.close()
         resultsFile.close()
 
         # close router socket
@@ -286,8 +298,11 @@ class WrtmTester(object):
         parser = argparse.ArgumentParser(description=WrtmTester.ARGPARSE_DESCRIPTION)
         parser.add_argument('filePath', type=str,
                             help='path to the test description file')
-        parser.add_argument('--noload', action='store_true',
+        parser.add_argument('-n', '--noload', action='store_true',
                             help='disable automatic N2X initialization',
+                            required=False, default=False)
+        parser.add_argument('-v', '--verboseLog', action='store_true',
+                            help='print the serial output directly to console',
                             required=False, default=False)
         args = parser.parse_args(argv)
 
@@ -316,7 +331,7 @@ class WrtmTester(object):
         for testPlan in [x for x in self.testParser.sections() if x != 'main']:
             print("Starting test suite '" + testPlan + "'"
                   + " at " + time.strftime("%d-%m-%Y %H:%M:%S", time.gmtime()))
-            self.executePlan(testPlan)
+            self.executePlan(testPlan, args.verboseLog)
             print("***\n")
 
         # shutdown n2x
