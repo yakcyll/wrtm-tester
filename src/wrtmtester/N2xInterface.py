@@ -1,7 +1,7 @@
-from socket import socket, SHUT_RDWR
+import socket
 
 
-def listFromReponse(response):
+def listFromResponse(output):
     return output[output.find("{")+1:output.rfind("}")].split(' ')
 
 class N2xInterface(object):
@@ -30,9 +30,9 @@ class N2xInterface(object):
 
     def reverseProxy(self):
         serverSocket = socket.socket()
-        serverSocket.bind("0.0.0.0:" + str(self.smPort))
+        serverSocket.bind(('', self.proxyPort))
         serverSocket.listen(1)
-        self.proxySocket, self.proxyAddress = self.socket.accept()
+        self.proxySocket, self.proxyAddress = serverSocket.accept()
         serverSocket.shutdown(socket.SHUT_RDWR)
         serverSocket.close()
 
@@ -62,7 +62,7 @@ class N2xInterface(object):
                raise RuntimeError("errorneous response in connectToSession: (" 
                                   + str(result) + ") " + output)
 
-            self.sessionId = sesionId
+            self.sessionId = sessionId
 
     def disconnectFromSession(self):
         if self.sessionId < 1:
@@ -82,7 +82,7 @@ class N2xInterface(object):
     def invoke(self, interfaceName, methodName, args=""):
         data = "invoke " + interfaceName + " " + methodName + " " + str(args);
 
-        self._writeWrapper(data, self.proxySsocket)
+        self._writeWrapper(self.proxySocket, data)
         result, output = self._readWrapper(self.proxySocket)
 
         if result != 0:
@@ -128,6 +128,12 @@ class N2xInterface(object):
 
         self.disconnectFromSession()
         self.smInvoke("AgtSessionManager", "CloseSession", sessionId)
+
+    def getSessionPort(self, sessionId=None):
+        if sessionId is None:
+            sessionId = self.sessionId
+
+        return self.smInvoke("AgtSessionManager", "GetSessionPort", sessionId)
 
     def getSessionLabel(self, sessionId=None):
         if sessionId is None:
@@ -183,8 +189,8 @@ class N2xInterface(object):
         return listFromResponse(self.invoke("AgtEthernetAddresses", "ListSutIpAddresses", str(port)))                
     def modifySutIpAddress(self, port, oldip, ip):
         try:
-            socket.inet_pton(oldip)
-            socket.inet_pton(ip)
+            socket.inet_aton(oldip)
+            socket.inet_aton(ip)
         except socket.error:
             raise RuntimeError("Malformed IP address supplied (oldip=" + oldip + ",ip=" + ip + ")")
 
@@ -196,7 +202,7 @@ class N2xInterface(object):
 
     def setTesterIpAddress(self, port, ip, mask, noaddr=1, step=1):
         try:
-            socket.inet_pton(ip)
+            socket.inet_aton(ip)
         except socket.error:
             raise RuntimeError("Malformed IP address supplied (ip=" + ip + ")")
 
@@ -245,8 +251,8 @@ class N2xInterface(object):
         args = streamgroup + " AGT_L2_FCS_ERROR"
         self.invoke("AgtStreamGroup", "SetL2Error", args)
 
-    def setFixedPDUFieldValue(self, pdu, protocol, field, value):
-        args = pdu + " \"" + protocol + "\" 1 \"" + field + "\" " + value
+    def setFixedPduFieldValue(self, pdu, protocol, field, value):
+        args = pdu + " \"" + protocol + "\" 1 \"" + field + "\" " + str(value)
         self.invoke("AgtPduHeader", "SetFieldFixedValue", args)
 
     def setIpv4SourceAddress(self, pdu, addr):
@@ -255,17 +261,17 @@ class N2xInterface(object):
     def setIpv4DestinationAddress(self, pdu, addr):
         self.setFixedPduFieldValue(pdu, "ipv4", "destination_address", addr)
 
-    def setTcpSourcePort(self, pdu, addr):
-        self.setFixedPduFieldValue(pdu, "tcp", "source_port", addr)
+    def setTcpSourcePort(self, pdu, port):
+        self.setFixedPduFieldValue(pdu, "tcp", "source_port", port)
 
-    def setTcpDestinationPort(self, pdu, addr):
-        self.setFixedPduFieldValue(pdu, "tcp", "destination_port", addr)
+    def setTcpDestinationPort(self, pdu, port):
+        self.setFixedPduFieldValue(pdu, "tcp", "destination_port", port)
 
-    def setUdpSourcePort(self, pdu, addr):
-        self.setFixedPduFieldValue(pdu, "udp", "source_port", addr)
+    def setUdpSourcePort(self, pdu, port):
+        self.setFixedPduFieldValue(pdu, "udp", "source_port", port)
 
-    def setUdpDestinationPort(self, pdu, addr):
-        self.setFixedPduFieldValue(pdu, "udp", "destination_port", addr)
+    def setUdpDestinationPort(self, pdu, port):
+        self.setFixedPduFieldValue(pdu, "udp", "destination_port", port)
 
     def setPayloadFill(self, pdu, fillType, hexFill):
         args = pdu + " " + fillType + " " + hexFill
@@ -290,7 +296,7 @@ class N2xInterface(object):
 
     def addMatcherFilter(self, port, frameMatcher, filter):
         args = port + " " + frameMatcher + " " + filter
-        self.invoke("AgtCaptureFilter", "AddFrameMatcherFilterss", args)
+        self.invoke("AgtCaptureFilter", "AddFrameMatcherFilters", args)
 
     def setCaptureMode(self, capMode):
         self.invoke("AgtCaptureControl", "SetCaptureMode", capMode)
