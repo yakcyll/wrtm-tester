@@ -76,13 +76,9 @@ class WrtmTester(object):
         for test in self.testParser.getTestGenerator(testName):
             retCount = 0
 
-            if retCount >= 3:
-                # if retry counter too high, skip test
-                continue
-
             try:
                 while True:
-                    print("\tExecuting test #" + str(test[0]) + " (" + time.strftime("%H:%M:%S", time.gmtime()) + ")")
+                    print("\r\tExecuting test #" + str(test[0]) + " (" + time.strftime("%H:%M:%S", time.gmtime()) + ")")
                     try:
                         # ping router
                         try:
@@ -144,7 +140,7 @@ class WrtmTester(object):
                                                testStopTime - testStartTime, retCount)
                 resultsFile.write(result + "\n")
 
-                print("\tTest done. Waiting for the router to announce its readiness.")
+                print("\r\tTest done. Waiting for the router to announce its readiness.")
                 # check if the router is ready (by waiting for broadcast on router socket)
                 # if it won't broadcast within 120 seconds, reboot through UPS
                 # in case it doesn't broadcast after two reboots, cancel the test suite altogether
@@ -163,7 +159,7 @@ class WrtmTester(object):
                                 if magic[1] == 0xFFFFFFFF and \
                                    magic[0] == WrtmTester.INIT_MAGIC:
                                     if test[0] < self.testParser.getNumberOfTestCases(testName):
-                                        print("\tResuming testing in 5 seconds...")
+                                        print("\r\tResuming testing in 5 seconds...")
                                         time.sleep(5)
                                     break
                             timeoutCounter += 1
@@ -180,7 +176,7 @@ class WrtmTester(object):
                         if rebootCounter == 3:
                             break
 
-                        print("\t" + str(re))
+                        print("\r\t" + str(re))
                         # reboot here
                         continue
 
@@ -194,7 +190,7 @@ class WrtmTester(object):
                 initSocket.bind(('', WrtmTester.INIT_PORT))
 
             except WrtmTestError as te:
-                print("\t" + str(te))
+                print("\r\t" + str(te))
                 self.routerSocket.close()
                 initSocket.close()
                 return
@@ -206,14 +202,14 @@ class WrtmTester(object):
                 else:
                     testTime = 0
                 
-                print("\t" + str(tme))
+                print("\r\t" + str(tme))
                 result = self._formResultString(test, WrtmTester.ERR_RCV_TIMEOUT, testTime, retCount) \
                          + " [" + str(tme) + "]"
                 resultsFile.write(result + "\n")
                 continue
 
         # testing done!
-        print("Test suite done!")
+        print("\rTest suite done!")
 
         # pkill minicom to close log file and close the result file
         #os.system("pkill minicom")

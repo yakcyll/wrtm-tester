@@ -92,7 +92,7 @@ class N2xInterface(object):
         
     def _writeWrapper(self, socket, data):
         try:
-            socket.sendall(data)
+            socket.sendall(bytes(data + "\r\n", 'utf-8'))
 
         except OSError:
             self.shutdown()
@@ -101,7 +101,7 @@ class N2xInterface(object):
     def _readWrapper(self, socket):
         try:
             while "\r\n" not in self.readBuffer:
-                self.readBuffer += str(socket.recv(4096))
+                self.readBuffer += socket.recv(4096).decode('utf-8')
 
             parts = self.readBuffer.partition("\r\n")
             self.readBuffer = parts[2]
