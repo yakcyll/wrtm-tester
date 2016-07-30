@@ -121,6 +121,7 @@ class WrtmTester(object):
                             raise WrtmTimeoutError("Test #" + str(test[0]) + " skipped "
                                                    + "due to excessive number of init retries.")
                         print("\r\tLink with the router timed out. Retrying...")
+                        continue
 
                 testStartTime = time.time()
 

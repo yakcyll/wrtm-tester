@@ -74,13 +74,13 @@ class TestPlanParser(object):
             for i in range(0, len(tests)):
                 testTuple = tests[i].split(' ')
                 if testTuple[3][0] == '+' or testTuple[3][0] == '-':
-                    offset += int(testTuple[3][0])
+                    offset += int(testTuple[3])
                 else:
-                    offset = int(testTuple[3][0]) + it * offsetStep
+                    offset = int(testTuple[3]) + it * offsetStep
                 
                 testTuple[3] = offset
 
-                yield self.parseTestLine(i+1, testTuple)
+                yield self.parseTestLine(len(tests)*it+i+1, testTuple)
     
         return None
     

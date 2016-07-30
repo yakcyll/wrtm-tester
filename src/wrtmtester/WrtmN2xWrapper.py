@@ -93,7 +93,7 @@ class WrtmN2xWrapper(object):
         self.n2x.setErroredFrameFilter(self.n2x.ports[3], 
                                        "AGT_STATISTICS_FILTER_INCLUDE_ALL_FRAMES")
 
-        self.n2x.inited = True
+        self.inited = True
 
     def _startLoadStreams(self):
         if self.inited:
@@ -114,5 +114,6 @@ class WrtmN2xWrapper(object):
         if self.inited:
             if self.running:
                 self._stopLoadStreams()
+            self.inited = False
             self.n2x.closeSession()
             self.n2x.disconnectFromProxy()
