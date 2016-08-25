@@ -21,6 +21,7 @@ class TestPlanParser(object):
 
     def __init__(self):
         self.parser = SafeConfigParser()
+        self.currentTestSuite = ""
         self.loaded = False
         self.loadedPath = None
         self.testTypes = {}
@@ -56,7 +57,12 @@ class TestPlanParser(object):
 
         return len(self.parser[name]['plan'].split('\n')[1:]) * loops
 
+    def getNumberOfTestCasesForCurrentSuite(self):
+        return self.getNumberOfTestCases(self.currentTestSuite)
+
     def getTestGenerator(self, name=None):
+        self.currentTestSuite = name
+
         if self.parser.has_option(name, 'loop'):
             loops = self.parser.getint(name, 'loop')
         else:
@@ -82,6 +88,7 @@ class TestPlanParser(object):
 
                 yield self.parseTestLine(len(tests)*it+i+1, testTuple)
     
+        self.currentTestSuite = ""
         return None
     
     def parseTestLine(self, testIter, testTuple):

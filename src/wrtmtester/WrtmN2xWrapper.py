@@ -31,23 +31,23 @@ class WrtmN2xWrapper(object):
             self.n2x.setProfileMode(profile, "AgtConstantProfile", 
                                     "AGT_TRAFFIC_PROFILE_MODE_CONTINUOUS")
             self.n2x.setProfileAverageLoad(profile, "AgtConstantProfile",
-                                           "1 AGT_UNITS_MBITS_PER_SEC")
+                                           "50 AGT_UNITS_PACKETS_PER_SEC")
             self.n2x.addStreamGroupToProfile(profile)
 
         self.n2x.setExpectedDestinations(self.n2x.streamGroups[0], self.n2x.ports[2])
         self.n2x.setExpectedDestinations(self.n2x.streamGroups[1], self.n2x.ports[3])
 
         for streamGroup in self.n2x.streamGroups[:2]:
-            self.n2x.setPduHeaders(streamGroup, ['ethernet', 'ipv4', 'tcp'])
+            self.n2x.setPduHeaders(streamGroup, ['ethernet', 'ipv4', 'udp'])
 
         self.n2x.setIpv4SourceAddress(self.n2x.PDUs[0], "192.168.1.2")
         self.n2x.setIpv4SourceAddress(self.n2x.PDUs[1], "192.168.2.2")
-        self.n2x.setIpv4DestinationAddress(self.n2x.PDUs[0], "192.168.3.2")
-        self.n2x.setIpv4DestinationAddress(self.n2x.PDUs[1], "192.168.4.2")
-        self.n2x.setTcpSourcePort(self.n2x.PDUs[0], 6478)
-        self.n2x.setTcpSourcePort(self.n2x.PDUs[1], 6478)
-        self.n2x.setTcpDestinationPort(self.n2x.PDUs[0], 6479)
-        self.n2x.setTcpDestinationPort(self.n2x.PDUs[1], 6479)
+        self.n2x.setIpv4DestinationAddress(self.n2x.PDUs[0], "192.168.1.1")
+        self.n2x.setIpv4DestinationAddress(self.n2x.PDUs[1], "192.168.2.1")
+        self.n2x.setUdpSourcePort(self.n2x.PDUs[0], 6478)
+        self.n2x.setUdpSourcePort(self.n2x.PDUs[1], 6479)
+        self.n2x.setUdpDestinationPort(self.n2x.PDUs[0], 6478)
+        self.n2x.setUdpDestinationPort(self.n2x.PDUs[1], 6479)
 
         self.n2x.setPayloadFill(self.n2x.PDUs[0], "AGT_PAYLOAD_FILL_TYPE_REPEATING", "0xA5A53C3C")
         self.n2x.setPayloadFill(self.n2x.PDUs[1], "AGT_PAYLOAD_FILL_TYPE_REPEATING", "0x96965A5A")
@@ -79,19 +79,27 @@ class WrtmN2xWrapper(object):
 
         self.n2x.setCaptureMode("AGT_CAPTURE_CYCLIC")
 
-        self.n2x.createStatHandler()
-        self.n2x.createStatHandler()
+        for port in self.n2x.ports:
+            stats = self.n2x.createStatHandler()
+            self.n2x.selectStats(stats, "AGT_IP_DATAGRAMS_TRANSMITTED " +
+                                        "AGT_IP_DATAGRAMS_RECEIVED " +
+                                        "AGT_IP_HEADER_CHECKSUM_ERRORS " +
+                                        "AGT_MISDIRECTED_PACKETS_RECEIVED " +
+                                        "AGT_PACKET_ERROR_RATE " +
+                                        "AGT_ETHERNET_INVALID_FCS_FRAMES_RECEIVED")
+            self.n2x.selectStatPorts(stats, port)
+            self.n2x.setErroredFrameFilter(port, "AGT_STATISTICS_FILTER_INCLUDE_ALL_FRAMES")
 
-        self.n2x.selectStats(self.n2x.stats[0], "AGT_PACKET_INTEGRITY_ERROR")
-        self.n2x.selectStats(self.n2x.stats[1], "AGT_PACKET_INTEGRITY_ERROR")
-
-        self.n2x.selectStatStreamGroup(self.n2x.stats[0], self.n2x.streamGroups[0])
-        self.n2x.selectStatStreamGroup(self.n2x.stats[1], self.n2x.streamGroups[1])
-
-        self.n2x.setErroredFrameFilter(self.n2x.ports[2], 
-                                       "AGT_STATISTICS_FILTER_INCLUDE_ALL_FRAMES")
-        self.n2x.setErroredFrameFilter(self.n2x.ports[3], 
-                                       "AGT_STATISTICS_FILTER_INCLUDE_ALL_FRAMES")
+        for stream in self.n2x.streamGroups:
+            stats = self.n2x.createStatHandler()
+            self.n2x.selectStats(stats, "AGT_STREAM_PACKET_LOSS " +
+                                        "AGT_STREAM_AVERAGE_LATENCY " +
+                                        "AGT_STREAM_MAXIMUM_LATENCY " +
+                                        "AGT_STREAM_SEQUENCE_ERRORS " +
+                                        "AGT_STREAM_PACKET_INTEGRITY_ERROR " +
+                                        "AGT_STREAM_PACKET_ERROR_RATE " +
+                                        "AGT_STREAM_PAYLOAD_BIT_ERROR_RATIO")
+            self.n2x.selectStatStreamGroup(stats, stream)
 
         self.inited = True
 
@@ -108,7 +116,11 @@ class WrtmN2xWrapper(object):
             self.n2x.stopCapture()
 
     def collectLoadStats(self):
-        pass
+        outlist = []
+        for stats in self.n2x.stats:
+            outlist.append(self.n2x.collectStats(stats))
+
+        return outlist
 
     def shutdownN2X(self):
         if self.inited:

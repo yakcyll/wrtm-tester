@@ -326,7 +326,9 @@ class N2xInterface(object):
 
     # N2X API statistics wrappers
     def createStatHandler(self):
-        self.stats.append(self.invoke("AgtStatisticsList", "Add", "AGT_STATISTICS"))
+        statHandler = self.invoke("AgtStatisticsList", "Add", "AGT_STATISTICS")
+        self.stats.append(statHandler)
+        return statHandler
 
     def selectStats(self, stats, statTypes):
         args = stats + " {" + statTypes + "}"
@@ -346,6 +348,12 @@ class N2xInterface(object):
         args = stats + " " + streamGroups
         self.invoke("AgtStatistics", "SelectStreamGroups", args)
 
-    def collectStats(self, stats, streamGroup):
+    def collectStats(self, stats):
+        args = stats
+        response = self.invoke("AgtStatistics", "GetStatistics", args)
+        return listFromResponse(response.partition(" ")[2])
+
+    def collectStreamGroupStats(self, stats, streamGroup):
         args = stats + " " + streamGroup
-        return listFromResponse(self.invoke("AgtStatistics", "GetStreamGroupStatistics", args))
+        response = self.invoke("AgtStatistics", "GetStreamGroupStatistics", args)
+        return listFromResponse("{" + response.partition("{")[2])

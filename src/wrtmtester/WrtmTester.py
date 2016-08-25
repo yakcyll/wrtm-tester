@@ -53,6 +53,7 @@ class WrtmTester(object):
         self.n2x = WrtmN2xWrapper()
         self.serial = SerialReader()
 
+        self.initSocket = None
         self.routerSocket = None
         self.routerIp = None
 
@@ -77,28 +78,28 @@ class WrtmTester(object):
         self.routerSocket.bind(('', WrtmTester.TEST_PORT))
 
         # init init socket
-        initSocket = socket.socket(type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
-        initSocket.bind(('', WrtmTester.INIT_PORT))
+        self.initSocket = socket.socket(type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
+        self.initSocket.bind(('', WrtmTester.INIT_PORT))
 
         # open result file
-        resultsFile = open("results_" + timeStr + ".txt", "a+")
+        resultsFile = open("results-" + testName + "-" + timeStr + ".txt", "a+")
 
         # loop over tests:
         for test in self.testParser.getTestGenerator(testName):
             retCount = 0
 
             try:
+                # ping router
+                try:
+                    ping_one(self.routerIp)
+                except socket.error:
+                    self.shutdownN2X()
+                    raise WrtmTestError("Router under test did not respond to the "
+                                        + "initial ping request. Abandoning ship.")
+
                 while True:
                     print("\r\tExecuting test #" + str(test[0]) + " (" + time.strftime("%H:%M:%S", time.gmtime()) + ")")
                     try:
-                        # ping router
-                        try:
-                            ping_one(self.routerIp)
-                        except socket.error:
-                            self.shutdownN2X()
-                            raise WrtmTestError("Router under test did not respond to the "
-                                                + "initial ping request. Abandoning ship.")
-
                         # start load streams/send test definition (order depends on delay)
                         # receive acknowledgement
                         delay = int(self.testParser.parser[testName]['loadDelay'])
@@ -115,11 +116,15 @@ class WrtmTester(object):
 
                         break
 
-                    except WrtmTimeoutError:
+                    except WrtmTimeoutError as wte:
+                        print("\r\t" + str(wte))
+                        self._waitForReboot(test)
+
                         retCount += 1
                         if retCount == 3:
                             raise WrtmTimeoutError("Test #" + str(test[0]) + " skipped "
                                                    + "due to excessive number of init retries.")
+
                         print("\r\tLink with the router timed out. Retrying...")
                         continue
 
@@ -133,82 +138,50 @@ class WrtmTester(object):
                     try:
                         ping_one(self.routerIp)
                     except socket.error:
-                        self.shutdownN2X()
+                        self.n2x._stopLoadStreams()
                         raise WrtmTimeoutError("Router under test did not respond to a ping request "
                                                + "during test #" + str(test[0]))
 
                 testStopTime = time.time()
                 testRunning = False
 
+                testRes = WrtmTester.ERR_OK 
+
                 # after pinging: send stop-test, wait for ack; if no response, fail the test
-                self._sendTest(test, stop=True)
+                try:
+                    self._sendTest(test, stop=True)
+                except WrtmTimeoutError as wte:
+                    print("\r\t" + str(wte))
+                    testRes = WrtmTester.ERR_RCV_TIMEOUT
 
                 # post-test:
                 # stop load streams
                 self.n2x._stopLoadStreams()
 
+                # collect stats
+                statList = self.n2x.collectLoadStats()
+
                 # if test passed (no matter the result), save the result
-                result = self._formResultString(test, WrtmTester.ERR_OK, 
-                                               testStopTime - testStartTime, retCount)
+                result = self._formResultString(test, testRes,
+                                                testStopTime - testStartTime, retCount, statList)
                 resultsFile.write(result + "\n")
 
-                print("\r\tTest done. Waiting for the router to announce its readiness.")
+                print("\r\tTest done. Waiting for the router to announce its readiness.") 
                 # check if the router is ready (by waiting for broadcast on router socket)
                 # if it won't broadcast within 120 seconds, reboot through UPS
                 # in case it doesn't broadcast after two reboots, cancel the test suite altogether
-                rebootCounter = 0
+                self._waitForReboot(test)
 
-                while rebootCounter < 3:
-                    try:
-                        timeoutCounter = 0
-                        while(timeoutCounter < WrtmTester.INIT_TIMEOUT):
-                            rsock, _, _ = select.select([initSocket], [], [], 1)
-                            if rsock != []:
-                                data, addr = rsock[0].recvfrom(4096)
-                                if addr[0] != self.routerIp:
-                                    continue
-                                magic = struct.unpack("<II", data[2:10])
-                                if magic[1] == 0xFFFFFFFF and \
-                                   magic[0] == WrtmTester.INIT_MAGIC:
-                                    if test[0] < self.testParser.getNumberOfTestCases(testName):
-                                        print("\r\tResuming testing in 5 seconds...")
-                                        time.sleep(5)
-                                    break
-                            timeoutCounter += 1
-                        
-                        if timeoutCounter == WrtmTester.INIT_TIMEOUT:
-                            raise WrtmRebootError("Router did not initiate after " + 
-                                                  str(WrtmTester.INIT_TIMEOUT) + " seconds, " + 
-                                                  "preparing for a power cycle.")
-
-                        break
-
-                    except WrtmRebootError as re:
-                        rebootCounter += 1
-                        if rebootCounter == 3:
-                            break
-
-                        print("\r\t" + str(re))
-                        os.system('upscmd -u admin -p asdf everwrt load.off')
-                        print("\r\t** System powered down. Restoring power in 10...")
-                        time.sleep(10)
-                        os.system('upscmd -u admin -p asdf everwrt load.on')
-                        continue
-
-                if rebootCounter == 3:
-                   raise WrtmTestError("Router did not initiate after three tries, " +
-                                       "aborting testing.") 
-        
                 # flush init socket
-                initSocket.close()
-                initSocket = socket.socket(type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
-                initSocket.bind(('', WrtmTester.INIT_PORT))
+                self.initSocket.close()
+                self.initSocket = socket.socket(type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
+                self.initSocket.bind(('', WrtmTester.INIT_PORT))
 
             except WrtmTestError as te:
                 print("\r\t" + str(te))
                 self.serial.close()
                 self.routerSocket.close()
-                initSocket.close()
+                self.initSocket.close()
                 return
 
             except WrtmTimeoutError as tme:
@@ -232,8 +205,54 @@ class WrtmTester(object):
         resultsFile.close()
 
         # close router socket
-        initSocket.close()
+        self.initSocket.close()
         self.routerSocket.close()
+
+    def _waitForReboot(self, test):
+        rebootCounter = 0
+        while rebootCounter < 3:
+            try:
+                timeoutCounter = 0
+                while(timeoutCounter < WrtmTester.INIT_TIMEOUT):
+                    rsock, _, _ = select.select([self.initSocket], [], [], 1)
+                    if rsock != []:
+                        data, addr = rsock[0].recvfrom(4096)
+                        if addr[0] != self.routerIp:
+                            continue
+                        magic = struct.unpack("<II", data[2:10])
+                        if magic[1] == 0xFFFFFFFF and \
+                           magic[0] == WrtmTester.INIT_MAGIC:
+                            if test[0] < self.testParser.getNumberOfTestCasesForCurrentSuite():
+                                print("\r\tResuming testing in 5 seconds...")
+                                time.sleep(5)
+                            break
+                    timeoutCounter += 1
+                
+                if timeoutCounter == WrtmTester.INIT_TIMEOUT:
+                    raise WrtmRebootError("Router did not initiate after " + 
+                                          str(WrtmTester.INIT_TIMEOUT) + " seconds, " + 
+                                          "preparing for a power cycle.")
+
+                break
+
+            except WrtmRebootError as re:
+                rebootCounter += 1
+                if rebootCounter == 3:
+                    raise WrtmTestError("The router did not initiate after three reboots, "
+                                        + "abandoning ship.")
+
+                print("\r\t" + str(re))
+                os.system('upscmd -u admin -p asdf everwrt load.off')
+                print("\r\t** System powered down. Restoring power in 10...")
+                time.sleep(10)
+                os.system('upscmd -u admin -p asdf everwrt load.on')
+                print("\r\tWaiting for the router to boot...")
+                continue
+
+        if rebootCounter == 3:
+           raise WrtmTestError("Router did not initiate after three tries, " +
+                               "aborting testing.") 
+
 
     def _prepareTestPacket(self, test, stop=False):
         if stop:
@@ -265,7 +284,11 @@ class WrtmTester(object):
             #print("[:debug] timediff " + str(timeDiff))
             timeDiff += stopTime - startTime
             if read == []:
-                raise WrtmTimeoutError()
+                stopStr = "init"
+                if stop:
+                    stopStr = "stop"
+                raise WrtmTimeoutError("The router did not send the test " + stopStr + " acknowledgement.")
+
             ackData = self.routerSocket.recv(10)
             #print("[:debug] ackData " + ":".join("{:02x}".format(c) for c in ackData))
             ackPack = struct.unpack("<2xiL", ackData)
@@ -280,18 +303,21 @@ class WrtmTester(object):
                     continue
                 elif ackPack[1] == 1:
                     raise WrtmTestError("Specified test type (" + str(test[1]) + ") "
-                                        + "was not identified on RUT!")
+                                        + "was not identified on RUT! (received a NACK for test type "
+                                        + str(ackPack[0]) + ")")
                 raise WrtmTestError("Received a NACK for test #" + str(test[0]) + " from RUT!")
 
-    def _formResultString(self, test, errCode, testTime, retCount):
+    def _formResultString(self, test, errCode, testTime, retCount, stats=None):
         timeStr = time.strftime("%d-%m-%Y %H-%M-%S", time.gmtime())
-        result = "#" + str(test[0]) + " (" + timeStr \
-                 + ") ret: " + str(errCode) \
-                 + " id: " + str(test[1]) \
-                 + " if: " + test[2] \
-                 + " (o,m/c): (" + str(test[4]) + "," + str(test[5]) \
-                 + ") time:  " + str(testTime) \
-                 + "s rtr: " + str(retCount)
+        result = str(test[0]) + " " + timeStr \
+                 + " " + str(errCode) \
+                 + " " + str(test[1]) \
+                 + " " + test[2] \
+                 + " " + str(test[4]) + " " + str(test[5]) \
+                 + " " + str(testTime) \
+                 + " " + str(retCount)
+        if stats is not None:
+            result += " " + str(stats)
         return result
         
     def main(self, argv):
@@ -333,6 +359,9 @@ class WrtmTester(object):
 
         # execute plan
         for testPlan in [x for x in self.testParser.sections() if x != 'main']:
+            if self.testParser.parser.has_option(testPlan, 'enabled') and not self.testParser.parser.getboolean(testPlan, 'enabled'):
+                continue
+
             print("Starting test suite '" + testPlan + "'"
                   + " at " + time.strftime("%d-%m-%Y %H:%M:%S", time.gmtime()))
             self.executePlan(testPlan, args.verboseLog)
